@@ -2,6 +2,9 @@ package book;
 
 import java.util.List;
 import java.util.Map;
+
+import book.BorrowInfo;
+
 import java.util.HashMap;
 
 public class BookService {
@@ -13,16 +16,26 @@ public class BookService {
         return dao.findAll();
     }
 
+    public BorrowInfo getBorrowInfoByBookId(int bookId) {
+        return borrowDAO.getBorrowInfoByBookId(bookId);
+    }
+    
     public List<Book> search(String keyword) {
         return dao.searchBooks(keyword);
     }
 
+    public List<BorrowInfo> getBorrowInfoByMemberId(String memberId) {
+        return borrowDAO.getBorrowInfoByMemberId(memberId);
+    }
     public boolean borrowBook(String memberId, int bookId) {
         return borrowDAO.borrowBook(memberId, bookId);
     }
     public List<String> getBorrowedTitles(String memberId) {
         BorrowDAO borrowDAO = new BorrowDAO();
         return borrowDAO.getBorrowedBookTitlesByMember(memberId);
+    }
+    public String getBorrowerByBookId(int bookId) {
+        return borrowDAO.getBorrowerByBookId(bookId);
     }
     public boolean deleteBook(int bookId) {
         if (dao.isBookBorrowed(bookId)) {
@@ -54,6 +67,22 @@ public class BookService {
         return borrowDAO.getBorrowedBookIds(memberId);
     }
 
+    
+    public void showBookList() {
+        List<Book> books = dao.findAll();
+
+        System.out.printf("%-5s %-20s %-20s %-15s\n", "ID", "제목", "저자", "상태");
+        for (Book book : books) {
+            int bookId = book.getBookId();
+            String title = book.getTitle();
+            String author = book.getAuthor();
+
+            String borrower = borrowDAO.getBorrowerByBookId(bookId);
+            String status = borrower != null ? "대출 중(" + borrower + ")" : "대출 가능";
+
+            System.out.printf("%-5d %-20s %-20s %-15s\n", bookId, title, author, status);
+        }
+    }
 
     public void showBorrowedBooks(String memberId) {
         borrowDAO.findBorrowsByMember(memberId); // 출력은 DAO에서 직접 처리
