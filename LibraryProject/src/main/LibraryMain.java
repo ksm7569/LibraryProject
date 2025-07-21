@@ -3,8 +3,11 @@ package main;
 import member.LibraryMember;
 import member.MemberService;
 import book.BookService;
+import book.BorrowInfo;
 import book.Book;
 
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
@@ -90,23 +93,31 @@ public class LibraryMain {
                         String role = m.isAdmin() ? "관리자" : "일반회원";
                         System.out.println(" ID: " + m.getId() + " / 이름: " + m.getName() + " / 권한: " + role);
 
-                        // 여기서 BorrowDAO 대신 bookService 사용
-                        List<String> borrowedTitles = bookService.getBorrowedTitles(m.getId());
-                        if (borrowedTitles.isEmpty()) {
+                        List<BorrowInfo> borrowList = bookService.getBorrowInfoByMemberId(m.getId());
+                        if (borrowList.isEmpty()) {
                             System.out.println("     없음");
                         } else {
-                            for (String title : borrowedTitles) {
-                                System.out.println("    " + title);
+                            for (BorrowInfo info : borrowList) {
+                                Book book = info.getBook();
+                                String title = book.getTitle();
+
+                                String borrowDateStr = new SimpleDateFormat("yyyy-MM-dd").format(info.getBorrowDate());
+                                Calendar cal = Calendar.getInstance();
+                                cal.setTime(info.getBorrowDate());
+                                cal.add(Calendar.DAY_OF_MONTH, 14);
+                                String returnDateStr = new SimpleDateFormat("yyyy-MM-dd").format(cal.getTime());
+
+                                System.out.printf("    %s (대출일자: %s, 반납일자: %s)\n", title, borrowDateStr, returnDateStr);
                             }
                         }
                         System.out.println();
                     }
                 }
-                    case 2 -> printBookList(bookService.listBooks(), bookService.getBookStatusMap());
-                    case 3 -> {
-                        System.out.print("검색어 입력: ");
-                        printBookList(bookService.search(sc.nextLine()), bookService.getBookStatusMap());
-                    }
+                case 2 -> printBookList(bookService.listBooks(), bookService);
+                case 3 -> {
+                    System.out.print("검색어 입력: ");
+                    printBookList(bookService.search(sc.nextLine()), bookService);
+                }
                     case 4 -> {
                         System.out.print("도서 제목: ");
                         String title = sc.nextLine();
@@ -135,11 +146,11 @@ public class LibraryMain {
                 }
             } else {
                 switch (menuIndex) {
-                    case 1 -> printBookList(bookService.listBooks(), bookService.getBookStatusMap());
+                case 1 -> printBookList(bookService.listBooks(), bookService);
                     case 2 -> bookService.showBorrowedBooks(loggedInMember.getId());
                     case 3 -> {
                         System.out.print("검색어 입력: ");
-                        printBookList(bookService.search(sc.nextLine()), bookService.getBookStatusMap());
+                        printBookList(bookService.search(sc.nextLine()), bookService);
                     }
                     case 4 -> {
                         System.out.print("대출할 도서 제목 입력: ");
@@ -193,7 +204,7 @@ public class LibraryMain {
         sc.close();
     }
 
-    private static void printBookList(List<Book> books, Map<Integer, Boolean> statusMap) {
+    private static void printBookList(List<Book> books, BookService bookService) {
         if (books.isEmpty()) {
             System.out.println("등록된 도서가 없습니다");
         } else {
@@ -201,9 +212,26 @@ public class LibraryMain {
             System.out.println("ID\t제목\t저자\t상태");
 
             for (Book b : books) {
-                boolean borrowed = statusMap.getOrDefault(b.getBookId(), false);
-                String status = borrowed ? "대출 중" : "대출 가능";
-                System.out.println(b.getBookId() + "\t" + b.getTitle() + "\t" + b.getAuthor() + "\t" + status);
+                int bookId = b.getBookId();
+                BorrowInfo info = bookService.getBorrowInfoByBookId(bookId);
+
+                String status;
+                if (info != null) {
+                    // 대출일 문자열
+                    String borrowDateStr = new SimpleDateFormat("yyyy-MM-dd").format(info.getBorrowDate());
+
+                    // 반납 예정일 계산: 대출일 + 14일
+                    Calendar cal = Calendar.getInstance();
+                    cal.setTime(info.getBorrowDate());
+                    cal.add(Calendar.DAY_OF_MONTH, 14);
+                    String returnDateStr = new SimpleDateFormat("yyyy-MM-dd").format(cal.getTime());
+
+                    status = "대출 중(" + info.getMemberId() + ", 대출일: " + borrowDateStr + ", 반납일자: " + returnDateStr + ")";
+                } else {
+                    status = "대출 가능";
+                }
+
+                System.out.println(bookId + "\t" + b.getTitle() + "\t" + b.getAuthor() + "\t" + status);
             }
         }
     }
