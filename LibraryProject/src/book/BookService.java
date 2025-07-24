@@ -3,14 +3,22 @@ package book;
 import java.util.List;
 import java.util.Map;
 
-import book.BorrowInfo;
+import member.LibraryMember;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
+import java.util.Date;
 import java.util.HashMap;
 
 public class BookService {
 
     private BookDAO dao = new BookDAO();
     private BorrowDAO borrowDAO = new BorrowDAO();
+
+    public BookService() {
+        // 기본 생성자
+    }
 
     public List<Book> listBooks() {
         return dao.findAll();
@@ -19,24 +27,65 @@ public class BookService {
     public BorrowInfo getBorrowInfoByBookId(int bookId) {
         return borrowDAO.getBorrowInfoByBookId(bookId);
     }
-    
+
     public List<Book> search(String keyword) {
         return dao.searchBooks(keyword);
+    }
+
+    public boolean extendBorrow(String memberId, int bookId) {
+        return borrowDAO.extendBorrowIfPossible(memberId, bookId);
     }
 
     public List<BorrowInfo> getBorrowInfoByMemberId(String memberId) {
         return borrowDAO.getBorrowInfoByMemberId(memberId);
     }
-    public boolean borrowBook(String memberId, int bookId) {
-        return borrowDAO.borrowBook(memberId, bookId);
+
+    public boolean borrowBook(LibraryMember member, int bookId) {
+        if (isSuspended(member)) {
+            printSuspensionNotice(member);
+            return false;
+        }
+
+        if (borrowDAO.isBookBorrowed(bookId)) {
+            System.out.println("이미 대출 중인 도서입니다.");
+            return false;
+        }
+
+        return borrowDAO.borrowBook(member.getId(), bookId);
     }
+
+    // 대출 정지 상태 확인
+    private boolean isSuspended(LibraryMember member) {
+        List<BorrowInfo> infos = borrowDAO.getBorrowInfoByMemberId(member.getId());
+
+        for (BorrowInfo info : infos) {
+            if (info.getReturnDate() == null && info.getReturnDueDate() != null) {
+                LocalDate dueDate = ((java.sql.Date) info.getReturnDueDate()).toLocalDate();
+                if (LocalDate.now().isAfter(dueDate)) {
+                    long overdueDays = ChronoUnit.DAYS.between(dueDate, LocalDate.now());
+                    member.banForDays((int) overdueDays);
+                    return true;
+                }
+            }
+        }
+
+        return member.isBanned();
+    }
+
+    // 대출 정지 안내 메시지
+    private void printSuspensionNotice(LibraryMember member) {
+        System.out.println("현재 대출정지회원입니다 " + member.getPenaltyEndDate() + "까지 책을 대출할 수 없습니다");
+    }
+
+
     public List<String> getBorrowedTitles(String memberId) {
-        BorrowDAO borrowDAO = new BorrowDAO();
         return borrowDAO.getBorrowedBookTitlesByMember(memberId);
     }
+
     public String getBorrowerByBookId(int bookId) {
         return borrowDAO.getBorrowerByBookId(bookId);
     }
+
     public boolean deleteBook(int bookId) {
         if (dao.isBookBorrowed(bookId)) {
             System.out.println("대출 중인 도서는 삭제할 수 없습니다");
@@ -45,8 +94,24 @@ public class BookService {
         return dao.deleteBook(bookId);
     }
 
-    public boolean returnBook(String memberId, int bookId) {
-        return borrowDAO.returnBook(memberId, bookId);
+    public boolean returnBook(LibraryMember member, int bookId) {
+        BorrowInfo info = borrowDAO.getBorrowInfoByBookId(bookId);
+
+        if (info == null || !info.getMemberId().equals(member.getId())) {
+            System.out.println("해당 도서를 반납할 권한이 없습니다.");
+            return false;
+        }
+
+        LocalDate dueDate = ((java.sql.Date) info.getReturnDueDate()).toLocalDate();
+        LocalDate returnDate = LocalDate.now();
+        long overdueDays = ChronoUnit.DAYS.between(dueDate, returnDate);
+
+        if (overdueDays > 0) {
+            member.banForDays((int) overdueDays);
+            System.out.println("연체 " + overdueDays + "일 → 대출 정지 " + overdueDays + "일 적용");
+        }
+
+        return borrowDAO.returnBook(member.getId(), bookId);
     }
 
     public Book getBookByTitle(String title) {
@@ -67,7 +132,6 @@ public class BookService {
         return borrowDAO.getBorrowedBookIds(memberId);
     }
 
-    
     public void showBookList() {
         List<Book> books = dao.findAll();
 
@@ -85,11 +149,10 @@ public class BookService {
     }
 
     public void showBorrowedBooks(String memberId) {
-        borrowDAO.findBorrowsByMember(memberId); // 출력은 DAO에서 직접 처리
+        borrowDAO.findBorrowsByMember(memberId);
     }
 
     public boolean registerBook(String title, String author) {
-        // 제목 중복 여부 확인
         if (!dao.findAllByTitle(title).isEmpty()) {
             System.out.println("동일한 제목의 도서가 존재합니다");
             return false;
@@ -109,4 +172,17 @@ public class BookService {
 
         return statusMap;
     }
-} 
+
+    public List<MemberBorrowCount> getMemberBorrowRanking(LocalDate start, LocalDate end) {
+        return borrowDAO.getMemberBorrowRanking(start, end);
+    }
+
+    public List<MemberBorrowCount> getMemberBorrowRanking() {
+        return borrowDAO.getMemberBorrowRanking();
+    }
+
+    
+    public List<BookBorrowCount> getBookBorrowRanking() {
+        return borrowDAO.getBookBorrowRanking();
+    }
+}

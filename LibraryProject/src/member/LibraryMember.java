@@ -1,11 +1,13 @@
 package member;
 
+import java.time.LocalDate;
+
 public class LibraryMember {
     private String id;
     private String password;
     private String name;
     private boolean isAdmin;
-
+    private LocalDate penaltyEndDate;
     
     public LibraryMember(String id, String password, String name) {
         this(id, password, name, false);
@@ -16,6 +18,19 @@ public class LibraryMember {
         this.password = password;
         this.name = name;
         this.isAdmin = isAdmin;
+    }
+
+    
+    public boolean isBanned() {
+        return penaltyEndDate != null && LocalDate.now().isBefore(penaltyEndDate);
+    }
+
+    public void banForDays(int days) {
+        this.penaltyEndDate = LocalDate.now().plusDays(days);
+    }
+
+    public LocalDate getPenaltyEndDate() {
+        return penaltyEndDate;
     }
 
     

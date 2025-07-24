@@ -2,9 +2,11 @@ package book;
 
 import db.DBConnection;
 import java.sql.*;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import book.BookBorrowCount;
 
 public class BorrowDAO {
 
@@ -17,11 +19,10 @@ public class BorrowDAO {
             checkStmt.setInt(1, bookId);
             ResultSet rs = checkStmt.executeQuery();
             if (rs.next()) {
-                System.out.println("해당 도서는 대출 중입니다.");
-                return false;
+                return false; // 도서가 이미 대출 중이면 false 반환, 메시지 출력 X
             }
 
-            String insertSql = "INSERT INTO borrow_table (member_id, book_id) VALUES (?, ?)";
+            String insertSql = "INSERT INTO borrow_table (member_id, book_id, borrow_date, return_due_date) VALUES (?, ?, SYSDATE, SYSDATE + 14)";
             PreparedStatement pstmt = conn.prepareStatement(insertSql);
             pstmt.setString(1, memberId);
             pstmt.setInt(2, bookId);
@@ -155,17 +156,15 @@ public class BorrowDAO {
             ResultSet rs = pstmt.executeQuery();
             return rs.next() && rs.getInt(1) > 0;
         } catch (Exception e) {
-            System.out.println("도서 대출 여부 확인 중 오류 발생");
             e.printStackTrace();
             return false;
         }
     }
 
-    // ✅ 완전 새로 구현: DB에서 대출 정보 + Book 정보 가져오기
     public List<BorrowInfo> getBorrowInfoByMemberId(String memberId) {
         List<BorrowInfo> result = new ArrayList<>();
 
-        String sql = "SELECT b.book_id, b.title, b.author, br.borrow_date " +
+        String sql = "SELECT b.book_id, b.title, b.author, br.borrow_date, br.return_due_date " +
                      "FROM borrow_table br JOIN book b ON br.book_id = b.book_id " +
                      "WHERE br.member_id = ? AND br.return_date IS NULL";
 
@@ -180,9 +179,10 @@ public class BorrowDAO {
                 String title = rs.getString("title");
                 String author = rs.getString("author");
                 Date borrowDate = rs.getDate("borrow_date");
+                Date returnDueDate = rs.getDate("return_due_date");
 
                 Book book = new Book(bookId, title, author);
-                BorrowInfo info = new BorrowInfo(memberId, borrowDate, book);
+                BorrowInfo info = new BorrowInfo(memberId, borrowDate, returnDueDate, book);
                 result.add(info);
             }
 
@@ -193,8 +193,9 @@ public class BorrowDAO {
         return result;
     }
 
+    
     public BorrowInfo getBorrowInfoByBookId(int bookId) {
-        String sql = "SELECT br.member_id, br.borrow_date, b.book_id, b.title, b.author " +
+        String sql = "SELECT br.member_id, br.borrow_date, br.return_due_date, b.book_id, b.title, b.author " +
                      "FROM borrow_table br JOIN book b ON br.book_id = b.book_id " +
                      "WHERE br.book_id = ? AND br.return_date IS NULL";
 
@@ -207,11 +208,12 @@ public class BorrowDAO {
             if (rs.next()) {
                 String memberId = rs.getString("member_id");
                 Date borrowDate = rs.getDate("borrow_date");
+                Date returnDueDate = rs.getDate("return_due_date");
                 String title = rs.getString("title");
                 String author = rs.getString("author");
                 Book book = new Book(bookId, title, author);
 
-                return new BorrowInfo(memberId, borrowDate, book);
+                return new BorrowInfo(memberId, borrowDate, returnDueDate, book);
             }
 
         } catch (Exception e) {
@@ -219,6 +221,82 @@ public class BorrowDAO {
         }
 
         return null;
+    }
+
+    public boolean extendBorrowIfPossible(String memberId, int bookId) {
+        String sql = """
+            UPDATE borrow_table
+            SET return_due_date = return_due_date + 7, extended = 1
+            WHERE member_id = ? AND book_id = ? AND return_date IS NULL AND extended = 0
+        """;
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, memberId);
+            pstmt.setInt(2, bookId);
+            return pstmt.executeUpdate() > 0;
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return false;
+    }
+
+    public List<MemberBorrowCount> getMemberBorrowRanking(LocalDate start, LocalDate end) {
+        List<MemberBorrowCount> list = new ArrayList<>();
+
+        String sql = """
+            SELECT member_id, COUNT(*) AS borrow_count
+            FROM borrow_table
+            WHERE borrow_date BETWEEN ? AND ?
+            GROUP BY member_id
+            ORDER BY borrow_count DESC
+        """;
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setDate(1, java.sql.Date.valueOf(start));
+            pstmt.setDate(2, java.sql.Date.valueOf(end));
+
+            ResultSet rs = pstmt.executeQuery();
+            while (rs.next()) {
+                String memberId = rs.getString("member_id");
+                int count = rs.getInt("borrow_count");
+                list.add(new MemberBorrowCount(memberId, count));
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        return list;
+    }
+
+    public List<MemberBorrowCount> getMemberBorrowRanking() {
+        List<MemberBorrowCount> list = new ArrayList<>();
+
+        String sql = """
+            SELECT member_id, COUNT(*) AS borrow_count
+            FROM borrow_table
+            GROUP BY member_id
+            ORDER BY borrow_count DESC
+        """;
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            while (rs.next()) {
+                String memberId = rs.getString("member_id");
+                int count = rs.getInt("borrow_count");
+                list.add(new MemberBorrowCount(memberId, count));
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        return list;
     }
 
     public String getBorrowerByBookId(int bookId) {
@@ -232,10 +310,40 @@ public class BorrowDAO {
                 return rs.getString("member_id");
             }
         } catch (Exception e) {
-            System.out.println("대출자 조회 중 오류 발생");
             e.printStackTrace();
         }
 
         return null;
     }
+    
+    public List<BookBorrowCount> getBookBorrowRanking() {
+        List<BookBorrowCount> list = new ArrayList<>();
+
+        String sql = """
+            SELECT b.book_id, b.title, COUNT(*) AS borrow_count
+            FROM borrow_table br
+            JOIN book b ON br.book_id = b.book_id
+            GROUP BY b.book_id, b.title
+            ORDER BY borrow_count DESC
+        """;
+
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            while (rs.next()) {
+                int bookId = rs.getInt("book_id");
+                String title = rs.getString("title");
+                int count = rs.getInt("borrow_count");
+                list.add(new BookBorrowCount(bookId, title, count));
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        return list;
+    }
+
+    
 }
